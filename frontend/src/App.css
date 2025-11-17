@@ -1,0 +1,97 @@
+body {
+  margin: 0;
+  padding: 0;
+  font-family: "Poppins", sans-serif;
+  overflow: hidden;
+  background: #0b0f19;
+}
+
+.container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* Sidebar Glass Effect */
+.sidebar {
+  width: 300px;
+  padding: 22px;
+  color: white;
+  backdrop-filter: blur(14px);
+  background: rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.12);
+  padding: 15px;
+  border-radius: 16px;
+}
+
+.bus-select {
+  width: 100%;
+  padding: 12px;
+  margin-top: 5px;
+  border-radius: 12px;
+  border: none;
+  outline: none;
+}
+
+.card {
+  margin-top: 20px;
+  padding: 15px;
+  border-radius: 14px;
+  color: white;
+}
+
+.ok {
+  color: #00e676;
+}
+.bad {
+  color: #ff5252;
+}
+
+/* Map */
+.map-wrapper {
+  flex: 1;
+}
+.map {
+  height: 100%;
+  width: 100%;
+}
+
+/* Stop Dot */
+.stop-dot {
+  width: 14px;
+  height: 14px;
+  background: orange;
+  border: 3px solid white;
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(0,0,0,0.6);
+}
+
+/* Buttons */
+.floating-btn {
+  position: absolute;
+  right: 20px;
+  padding: 10px 18px;
+  border-radius: 18px;
+  background: #222;
+  color: white;
+  border: none;
+  cursor: pointer;
+  z-index: 9999;
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.floating-btn:hover {
+  opacity: 1;
+}
+
+.recenter {
+  top: 20px;
+}
+.userloc {
+  top: 70px;
+}
