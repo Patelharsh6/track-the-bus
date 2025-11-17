@@ -1,263 +1,301 @@
-import { useEffect, useState } from "react";
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
-  Polyline,
-  useMap,
-} from "react-leaflet";
+// src/App.jsx
+import React, { useEffect, useState, useRef } from "react";
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./App.css";
 
-/* ================================================
-              BUS ROUTES + STOPS
-================================================ */
-export const BUS_ROUTES = {
-  "BUS-001": {
-    route: [
-      { lat: 23.0225, lon: 72.5714 },
-      { lat: 23.0350, lon: 72.5805 },
-      { lat: 23.0460, lon: 72.6000 },
-    ],
-    stops: [
-      { name: "Lal Darwaja", lat: 23.0225, lon: 72.5714 },
-      { name: "Income Tax", lat: 23.0350, lon: 72.5805 },
-      { name: "Vijay Cross", lat: 23.0460, lon: 72.6000 },
-    ],
-  },
-};
-
-/* ================================================
-                 ICONS
-================================================ */
+/* Icons */
 const busIcon = new L.Icon({
   iconUrl: "https://cdn-icons-png.flaticon.com/512/3097/3097144.png",
-  iconSize: [40, 40],
-  iconAnchor: [20, 20],
+  iconSize: [36, 36],
+  iconAnchor: [18, 18],
 });
-
 const userIcon = new L.Icon({
   iconUrl: "https://cdn-icons-png.flaticon.com/512/535/535239.png",
-  iconSize: [35, 35],
-  iconAnchor: [17, 17],
+  iconSize: [30, 30],
+  iconAnchor: [15, 15],
 });
 
-/* ================================================
-       GET REAL ROAD ROUTE (OSRM — FREE)
-================================================ */
-async function getRoadRoute(coords) {
-  const path = coords.map((p) => `${p.lon},${p.lat}`).join(";");
-
-  const url = `https://router.project-osrm.org/route/v1/driving/${path}?overview=full&geometries=geojson`;
-
-  const res = await fetch(url);
-  const data = await res.json();
-
-  if (!data.routes) return [];
-
-  return data.routes[0].geometry.coordinates.map((c) => [c[1], c[0]]);
+/* FlyTo hook */
+function FlyTo({ pos }) {
+  const map = useMap();
+  useEffect(() => {
+    if (pos) map.flyTo(pos, 15, { duration: 0.7 });
+  }, [pos, map]);
+  return null;
 }
 
-/* ================================================
-                  ETA
-================================================ */
-function calculateETA(bus, stop) {
-  if (!bus || !bus.speed_kmph) return "—";
-
+/* Haversine */
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const toRad = (d) => (d * Math.PI) / 180;
   const R = 6371;
-  const dLat = (stop.lat - bus.lat) * (Math.PI / 180);
-  const dLon = (stop.lon - bus.lon) * (Math.PI / 180);
-
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos(bus.lat * (Math.PI / 180)) *
-      Math.cos(stop.lat * (Math.PI / 180)) *
-      Math.sin(dLon / 2) ** 2;
-
-  const c = a;
-  const distance = R * c;
-
-  const speed = Number(bus.speed_kmph);
-  if (speed < 1) return ">20 min";
-
-  return `${Math.round((distance / speed) * 60)} min`;
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
-/* ================================================
-             MAP BUTTONS
-================================================ */
-function Recenter({ telemetry }) {
-  const map = useMap();
-  return (
-    <button
-      className="floating-btn recenter"
-      onClick={() =>
-        telemetry && map.flyTo([telemetry.lat, telemetry.lon], 16)
-      }
-    >
-      🚌 Locate Bus
-    </button>
-  );
-}
-
-function UserLocationBtn({ setUserPos }) {
-  const map = useMap();
-  return (
-    <button
-      className="floating-btn userloc"
-      onClick={() => {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            const lat = pos.coords.latitude;
-            const lon = pos.coords.longitude;
-            setUserPos([lat, lon]);
-            map.flyTo([lat, lon], 16);
-          },
-          () => alert("Location error")
-        );
-      }}
-    >
-      📍 My Location
-    </button>
-  );
-}
-
-/* ================================================
-               MAIN APP
-================================================ */
 export default function App() {
-  const [busList, setBusList] = useState([]);
-  const [telemetryMap, setTelemetryMap] = useState({});
-  const [selectedBus, setSelectedBus] = useState(null);
+  const [routes, setRoutes] = useState([]);
+  const [stops, setStops] = useState([]);
+  const [selectedRoute, setSelectedRoute] = useState(null);
+  const [buses, setBuses] = useState([]); // live telemetry snapshot
+  const [selectedStop, setSelectedStop] = useState(null);
+  const [stopInfo, setStopInfo] = useState(null);
   const [userPos, setUserPos] = useState(null);
+  const [nearest, setNearest] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [centerPos, setCenterPos] = useState([23.0305, 72.5800]);
 
-  const [roadRoute, setRoadRoute] = useState([]);
+  const wsRef = useRef(null);
 
-  /* WebSocket */
   useEffect(() => {
+    fetch("http://localhost:4000/routes").then(r => r.json()).then(data => {
+      setRoutes(data);
+      if (data.length) setSelectedRoute(data[0].id);
+    }).catch(console.error);
+
+    fetch("http://localhost:4000/stops").then(r => r.json()).then(s => setStops(s)).catch(console.error);
+
+    fetch("http://localhost:4000/buses").then(r => r.json()).then(b => setBuses(b)).catch(console.error);
+
     const ws = new WebSocket("ws://localhost:4000");
-
-    ws.onmessage = (msg) => {
-      const data = JSON.parse(msg.data);
-
-      setTelemetryMap((prev) => ({ ...prev, [data.vehicle_id]: data }));
-
-      if (!busList.includes(data.vehicle_id)) {
-        setBusList((prev) => [...prev, data.vehicle_id]);
-      }
-
-      if (!selectedBus) setSelectedBus(data.vehicle_id);
+    wsRef.current = ws;
+    ws.onopen = () => console.log("WS open");
+    ws.onmessage = (ev) => {
+      try {
+        const m = JSON.parse(ev.data);
+        if (m.type === "telemetry" || m.vehicle_id) {
+          const payload = m.type === "telemetry" ? m : m;
+          setBuses(prev => {
+            const idx = prev.findIndex(p => p.vehicle_id === payload.vehicle_id);
+            if (idx >= 0) {
+              const copy = [...prev];
+              copy[idx] = { ...copy[idx], ...payload };
+              return copy;
+            } else {
+              return [...prev, payload];
+            }
+          });
+        }
+      } catch (e) { /* ignore */ }
     };
-
+    ws.onerror = console.error;
     return () => ws.close();
-  }, [selectedBus]);
+  }, []);
 
-  /* Load real road route */
   useEffect(() => {
-    async function loadRoute() {
-      if (selectedBus && BUS_ROUTES[selectedBus]) {
-        const road = await getRoadRoute(BUS_ROUTES[selectedBus].route);
-        setRoadRoute(road);
-      }
-    }
-    loadRoute();
-  }, [selectedBus]);
+    setSelectedStop(null);
+    setStopInfo(null);
+  }, [selectedRoute]);
 
-  const telemetry = selectedBus ? telemetryMap[selectedBus] : null;
-  const defaultCenter = [23.0225, 72.5714];
+  function detectUser() {
+    if (!navigator.geolocation) return alert("Geolocation not supported");
+    navigator.geolocation.getCurrentPosition(pos => {
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      setUserPos([lat, lon]);
+      setCenterPos([lat, lon]);
+      fetch(`http://localhost:4000/nearest-stop?lat=${lat}&lon=${lon}`)
+        .then(r => r.json())
+        .then(res => {
+          setNearest(res);
+          if (res?.stop) {
+            setSelectedStop(res.stop.id);
+            fetchStopInfo(res.stop.id);
+          }
+        })
+        .catch(console.error);
+    }, () => alert("Cannot access location"));
+  }
+
+  function fetchStopInfo(stopId, destId = null) {
+    const q = destId ? `?dest=${destId}` : "";
+    fetch(`http://localhost:4000/stop/${stopId}${q}`).then(r => r.json()).then(d => setStopInfo(d)).catch(console.error);
+  }
+
+  function onSelectStop(stopId) {
+    setSelectedStop(stopId);
+    fetchStopInfo(stopId);
+    const s = stops.find(x => x.id === stopId);
+    if (s) setCenterPos([s.lat, s.lon]);
+    setDrawerOpen(true);
+  }
+
+  function computeFullTrip(destStopId) {
+    if (!nearest || !nearest.stop || !stopInfo) return null;
+    const walk = nearest.walk_minutes || 0;
+    const comingBus = stopInfo.buses.find(b => b.status === "coming");
+    const wait = comingBus ? comingBus.eta_to_stop_minutes : (stopInfo.buses[0] ? stopInfo.buses[0].eta_to_stop_minutes : 0);
+    const ride = comingBus && comingBus.eta_to_dest_minutes ? comingBus.eta_to_dest_minutes : 0;
+    return { walk, wait, ride, total: walk + wait + ride, bus: comingBus ? comingBus.vehicle_id : null };
+  }
 
   return (
-    <div className="container">
-      {/* Sidebar */}
-      <aside className="sidebar glass">
-        <h2>🚌 Smart Transport</h2>
+    <div className="app-container">
+      <header className="topbar">
+        <div className="brand">Smart Transit • Premium Demo</div>
+        <div className="controls">
+          <button className="btn" onClick={detectUser}>📍 My Location</button>
+          <button className="btn outline" onClick={() => { if (selectedStop) {
+            const s = stops.find(x => x.id === selectedStop); if (s) setCenterPos([s.lat, s.lon]); } }}>🚌 Locate Stop</button>
+        </div>
+      </header>
 
-        <label>Select Bus</label>
-        <select
-          className="bus-select"
-          value={selectedBus || ""}
-          onChange={(e) => setSelectedBus(e.target.value)}
-        >
-          {busList.map((id) => (
-            <option key={id} value={id}>
-              {id}
-            </option>
-          ))}
-        </select>
-
-        {telemetry ? (
-          <div className="card glass">
-            <p><b>Bus:</b> {telemetry.vehicle_id}</p>
-            <p><b>Lat:</b> {telemetry.lat?.toFixed(6)}</p>
-            <p><b>Lon:</b> {telemetry.lon?.toFixed(6)}</p>
-            <p><b>Speed:</b> {telemetry.speed_kmph} km/h</p>
-            <p><b>SAT:</b> {telemetry.sat}</p>
-
-            <p>
-              <b>Status:</b>{" "}
-              <span className={telemetry.status === "OK" ? "ok" : "bad"}>
-                {telemetry.status}
-              </span>
-            </p>
+      <div className="main-layout">
+        <aside className="leftpanel" aria-hidden={window.innerWidth < 720}>
+          <div className="panel-block">
+            <label>Route</label>
+            <select value={selectedRoute || ""} onChange={e => setSelectedRoute(e.target.value)}>
+              {routes.map(r => <option key={r.id} value={r.id}>{r.id} — {r.name}</option>)}
+            </select>
           </div>
-        ) : (
-          <p>Waiting for live data…</p>
-        )}
-      </aside>
 
-      {/* Map */}
-      <main className="map-wrapper">
-        <MapContainer center={defaultCenter} zoom={13} className="map">
+          <div className="panel-block">
+            <label>Stops</label>
+            <div className="stop-list">
+              {stops.filter(s => s.routeId === selectedRoute).map(s => (
+                <div key={s.id} className={`stop-row ${selectedStop === s.id ? "active" : ""}`} onClick={() => onSelectStop(s.id)}>
+                  <div>{s.name}</div>
+                  <div className="muted">{userPos ? `${Math.round(haversineKm(userPos[0], userPos[1], s.lat, s.lon) * 1000)} m` : ""}</div>
+                </div>
+              ))}
+            </div>
+          </div>
 
-          {/* Map layer */}
-          <TileLayer
-            url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
+          <div className="panel-block">
+            <label>Live buses</label>
+            <div className="bus-list">
+              {buses.filter(b => getRouteIdForUI(b) === selectedRoute).map(b => (
+                <div key={b.vehicle_id} className="bus-row">
+                  <div><b>{b.vehicle_id}</b></div>
+                  <div className="muted">{Math.round((b.speed_kmph || 0) * 10)/10} km/h</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </aside>
 
-          {/* Real road-following route */}
-          {roadRoute.length > 0 && (
-            <Polyline positions={roadRoute} color="blue" weight={5} />
-          )}
+        <main className="map-container">
+          <MapContainer center={centerPos} zoom={13} className="map">
+            <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <FlyTo pos={centerPos} />
 
-          {/* Stops */}
-          {selectedBus &&
-            BUS_ROUTES[selectedBus].stops.map((stop, i) => (
-              <Marker
-                key={i}
-                position={[stop.lat, stop.lon]}
-                icon={L.divIcon({
-                  className: "stop-icon",
-                  html: `<div class="stop-dot"></div>`,
-                })}
-              >
+            {/* stops */}
+            {stops.filter(s => s.routeId === selectedRoute).map(s => (
+              <CircleMarker key={s.id} center={[s.lat, s.lon]} radius={8} pathOptions={{ color: s.id === (nearest?.stop?.id) ? "#ff5500" : "#ff9900" }} eventHandlers={{ click: () => onSelectStop(s.id) }}>
                 <Popup>
-                  <b>{stop.name}</b>
-                  <br />
-                  ETA: {telemetry ? calculateETA(telemetry, stop) : "—"}
+                  <div style={{ minWidth: 160 }}>
+                    <b>{s.name}</b><br />
+                    <button className="btn tiny" onClick={() => onSelectStop(s.id)}>View buses</button>
+                  </div>
+                </Popup>
+              </CircleMarker>
+            ))}
+
+            {/* buses */}
+            {buses.filter(b => getRouteIdForUI(b) === selectedRoute).map(b => (
+              <Marker key={b.vehicle_id} position={[b.lat, b.lon]} icon={busIcon}>
+                <Popup>
+                  <div><b>{b.vehicle_id}</b><br/>{Math.round((b.speed_kmph || 0) *10)/10} km/h</div>
                 </Popup>
               </Marker>
             ))}
 
-          {/* Bus marker */}
-          {Object.values(telemetryMap).map((bus) =>
-            bus.lat && bus.lon ? (
-              <Marker
-                key={bus.vehicle_id}
-                position={[bus.lat, bus.lon]}
-                icon={busIcon}
-              />
-            ) : null
-          )}
+            {/* user */}
+            {userPos && <Marker position={userPos} icon={userIcon}><Popup>You are here</Popup></Marker>}
+          </MapContainer>
 
-          {/* User marker */}
-          {userPos && <Marker position={userPos} icon={userIcon} />}
+          {/* Bottom drawer */}
+          <div className={`drawer ${drawerOpen ? "open" : "closed"}`}>
+            <div className="drawer-handle" onClick={() => setDrawerOpen(s => !s)}>
+              <div className="handle-line" />
+              <div className="drawer-title">Stop Info</div>
+            </div>
 
-          <Recenter telemetry={telemetry} />
-          <UserLocationBtn setUserPos={setUserPos} />
-        </MapContainer>
-      </main>
+            <div className="drawer-content">
+              {!selectedStop && nearest && (
+                <div className="nearest-card">
+                  <div className="title">Nearest Stop</div>
+                  <div className="big">{nearest.stop.name}</div>
+                  <div className="muted">Walk: {nearest.walk_minutes} min • {Math.round(nearest.distance_km*1000)} m</div>
+                  <div className="actions">
+                    <button className="btn" onClick={() => onSelectStop(nearest.stop.id)}>View buses</button>
+                    <button className="btn outline" onClick={() => setCenterPos([nearest.stop.lat, nearest.stop.lon])}>Show on map</button>
+                  </div>
+                </div>
+              )}
+
+              {selectedStop && stopInfo && (
+                <div className="stop-panel">
+                  <div className="title">Stop: {stopInfo.stop.name}</div>
+                  <div className="muted">Route: {stopInfo.routeId}</div>
+
+                  <div className="list-title">Buses serving this stop</div>
+                  {stopInfo.buses.length === 0 && <div>No buses right now</div>}
+                  {stopInfo.buses.map(b => (
+                    <div key={b.vehicle_id} className={`bus-item ${b.status === "coming" ? "coming" : "gone"}`}>
+                      <div className="left">
+                        <div className="bus-id">{b.vehicle_id}</div>
+                        <div className="muted">{Math.round((b.speed_kmph||0)*10)/10} km/h</div>
+                      </div>
+                      <div className="right">
+                        <div className="muted">{b.status === "coming" ? `Arrives in ${b.eta_to_stop_minutes} min` : "Gone"}</div>
+                        {b.eta_to_dest_minutes !== null && <div className="muted">To destination: {b.eta_to_dest_minutes} min</div>}
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="plan-trip">
+                    <div className="sub">Plan trip from this stop</div>
+                    <select onChange={(e) => {
+                      const dest = e.target.value;
+                      if (dest) fetch(`http://localhost:4000/stop/${selectedStop}?dest=${dest}`).then(r=>r.json()).then(d=>setStopInfo(d)).catch(console.error);
+                    }} defaultValue="">
+                      <option value="">-- choose destination stop --</option>
+                      {stops.filter(s => s.routeId===selectedRoute && s.id !== selectedStop).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+
+                    <div style={{ marginTop: 8 }}>
+                      <button className="btn" onClick={() => {
+                        const full = computeFullTrip(selectedStop);
+                        if (!full) return alert("No trip info");
+                        alert(`Walk ${full.walk} min • Wait ${full.wait} min • Ride ${full.ride} min • Total ${full.total} min (Bus: ${full.bus || '-'})`);
+                      }}>Show total ETA</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {!nearest && !selectedStop && (
+                <div className="empty">Click "My Location" to find the nearest stop</div>
+              )}
+            </div>
+          </div>
+
+          <div className="mobile-controls">
+            <button className="btn round" onClick={detectUser}>📍</button>
+            <button className="btn round" onClick={() => { if (selectedStop) {
+              const s = stops.find(x => x.id === selectedStop); if (s) setCenterPos([s.lat, s.lon]); } }}>🚌</button>
+          </div>
+        </main>
+      </div>
     </div>
   );
+}
+
+/* Helper to read route id from buses (for UI) */
+/* We replicate backend mapping approach here so UI can group buses: */
+function getRouteIdForUI(bus) {
+  // prefer routeId property if present in telemetry
+  if (bus.routeId) return bus.routeId;
+  // fallback: try mapping using known IDs (same mapping keys as backend defaults)
+  const fallbackMap = {
+    "BUS-001":"R1","BUS-101":"R1","BUS-102":"R1","BUS-103":"R1"
+  };
+  return fallbackMap[bus.vehicle_id] || null;
 }
