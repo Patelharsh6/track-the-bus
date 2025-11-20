@@ -138,21 +138,26 @@ wss.on("connection", (ws) => {
 --------------------------*/
 const ROUTES = {
   R1: {
-    id: "R1",
-    name: "Lal Darwaja → Vijay Cross",
-    color: "#007bff",
-    stops: [
-      { id: "S1", name: "Lal Darwaja", lat: 23.0225, lon: 72.5714, seq: 0 },
-      { id: "S2", name: "Income Tax", lat: 23.0300, lon: 72.5800, seq: 1 },
-      { id: "S3", name: "Navrangpura", lat: 23.0355, lon: 72.5900, seq: 2 },
-      { id: "S4", name: "Vijay Cross", lat: 23.0402, lon: 72.6000, seq: 3 },
-    ],
-    path: [
-      [23.0225, 72.5714], [23.0250, 72.5750], [23.0300, 72.5800],
-      [23.0320, 72.5850], [23.0355, 72.5900], [23.0380, 72.5950],
-      [23.0402, 72.6000]
-    ]
-  },
+"id": "BUS-001",
+"name": "Vaishno Devi Circle → Dastan Circle",
+"color": "#007bff",
+"stops": [
+{ "id": "S1", "name": "Vaishno Devi Circle", "lat": 23.1422, "lon": 72.5480, "seq": 0 },
+{ "id": "S2", "name": "Zundal", "lat": 23.1307, "lon": 72.5850, "seq": 1 },
+{ "id": "S3", "name": "Tapovan Circle", "lat": 23.1190, "lon": 72.6144, "seq": 2 },
+{ "id": "S4", "name": "Bhat Circle", "lat": 23.1040, "lon": 72.6338, "seq": 3 },
+{ "id": "S5", "name": "Nana-chiloda Circle", "lat": 23.1112, "lon": 72.6734, "seq": 4 },
+{ "id": "S6", "name": "Dastan Circle", "lat": 23.0917, "lon": 72.6724, "seq": 5 }
+],
+"path": [
+[23.1422, 72.5480],
+[23.1307, 72.5850],
+[23.1190, 72.6144],
+[23.1040, 72.6338],
+[23.1112, 72.6734],
+[23.0917, 72.6724]
+]
+},
   R2: {
     id: "R2",
     name: "Ashram Rd → Gandhigram",

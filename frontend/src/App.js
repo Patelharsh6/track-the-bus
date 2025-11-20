@@ -1,4 +1,4 @@
-// src/App.jsx - FIXED VERSION
+// src/App.jsx - COMPLETELY FIXED VERSION
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { 
@@ -15,9 +15,6 @@ import 'leaflet-rotatedmarker';
 import "leaflet/dist/leaflet.css";
 import "./App.css";
 
-/* -------------------------
-   Icons and Leaflet Helpers
---------------------------*/
 // Fix for default markers in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -58,12 +55,6 @@ const userIcon = new L.Icon({
   iconAnchor: [15, 15],
 });
 
-const stopIcon = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png",
-  iconSize: [20, 20],
-  iconAnchor: [10, 10],
-});
-
 function FlyTo({ pos }) {
   const map = useMap();
   useEffect(() => {
@@ -74,31 +65,6 @@ function FlyTo({ pos }) {
   return null;
 }
 
-function haversineKm(lat1, lon1, lat2, lon2) {
-  const toRad = (d) => (d * Math.PI) / 180;
-  const R = 6371;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-function getRouteIdForUI(bus) {
-  if (bus.routeId) return bus.routeId;
-  const fallbackMap = { 
-    "BUS-001": "R1", 
-    "BUS-002": "R2", 
-    "BUS-003": "R1" 
-  };
-  return fallbackMap[bus.vehicle_id] || null;
-}
-
-/* -------------------------
-   Formatting Helpers
---------------------------*/
 function formatMinutes(totalMinutes) {
   if (totalMinutes === 0 || totalMinutes === null) return "0 min";
   const minutes = Math.round(totalMinutes);
@@ -127,9 +93,78 @@ function formatMeters(totalMeters) {
   return `${meters} m`;
 }
 
-/* -------------------------
-   Main App Component
---------------------------*/
+function getRouteIdForUI(bus) {
+  if (bus.routeId) return bus.routeId;
+  const fallbackMap = { 
+    "BUS-001": "R1", 
+    "BUS-002": "R2", 
+    "BUS-003": "R1" 
+  };
+  return fallbackMap[bus.vehicle_id] || null;
+}
+
+// Create a separate component for inputs to prevent re-renders
+const SearchInput = React.memo(({ 
+  inputRef, 
+  value, 
+  onChange, 
+  onSelectSuggestion,
+  suggestions,
+  placeholder,
+  label 
+}) => {
+  const [localSuggestions, setLocalSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  useEffect(() => {
+    setLocalSuggestions(suggestions);
+  }, [suggestions]);
+
+  const handleInputChange = (e) => {
+    onChange(e.target.value);
+  };
+
+  const handleSuggestionClick = (item) => {
+    onSelectSuggestion(item);
+    setShowSuggestions(false);
+  };
+
+  return (
+    <div className="autocomplete-field">
+      <label>{label}</label>
+      <input
+        ref={inputRef}
+        type="text"
+        placeholder={placeholder}
+        value={value}
+        onChange={handleInputChange}
+        className="autocomplete-input"
+        autoComplete="off"
+        onFocus={() => setShowSuggestions(true)}
+        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+      />
+      {showSuggestions && localSuggestions.length > 0 && (
+        <div className="autocomplete-suggestions">
+          {localSuggestions.map(item => (
+            <div 
+              key={item.id} 
+              className="suggestion-item"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSuggestionClick(item)}
+            >
+              <span className="suggestion-icon">🚏</span>
+              <div className="suggestion-content">
+                <div className="suggestion-main">{item.name}</div>
+                <div className="suggestion-sub">Route: {item.routeId}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
+
 export default function App() {
   const [routes, setRoutes] = useState([]);
   const [stops, setStops] = useState([]);
@@ -151,8 +186,13 @@ export default function App() {
   const [feedback, setFeedback] = useState(null);
   const [mapType, setMapType] = useState('standard');
   const [isLoading, setIsLoading] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
 
   const wsRef = useRef(null);
+  const originInputRef = useRef(null);
+  const destInputRef = useRef(null);
+  const searchTimeoutRef = useRef(null);
+  const stopsRef = useRef([]);
 
   const clearFeedback = useCallback(() => {
     setTimeout(() => setFeedback(null), 5000);
@@ -173,6 +213,7 @@ export default function App() {
         
         setRoutes(routesData);
         setStops(stopsData);
+        stopsRef.current = stopsData; // Store stops in ref to avoid dependency
         
         if (appMode === 'route' && routesData.length && !selectedRoute) {
           setSelectedRoute(routesData[0].id);
@@ -187,7 +228,7 @@ export default function App() {
     };
 
     initializeData();
-  }, [appMode, selectedRoute]);
+  }, [appMode, selectedRoute, clearFeedback]);
 
   // WebSocket connection
   useEffect(() => {
@@ -230,7 +271,6 @@ export default function App() {
         
         ws.onclose = () => {
           console.log("WebSocket disconnected");
-          // Attempt reconnection after 3 seconds
           setTimeout(connectWebSocket, 3000);
         };
         
@@ -241,7 +281,7 @@ export default function App() {
     };
 
     connectWebSocket();
-  }, []);
+  }, [clearFeedback]);
 
   // Update route path when route selection changes
   useEffect(() => {
@@ -256,81 +296,114 @@ export default function App() {
     }
   }, [selectedRoute, routes]);
 
-  // Get user location
-  const getUserLocation = useCallback(() => {
+  // FIXED: Stable location detection
+  const getUserLocation = useCallback(async () => {
     if (!navigator.geolocation) {
       setFeedback({ type: 'error', message: 'Geolocation not supported' });
       clearFeedback();
       return;
     }
 
-    setIsLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        setUserPos([latitude, longitude]);
-        setCenterPos([latitude, longitude]);
-        
-        // Find nearest stop
-        fetch(`http://localhost:4000/nearest-stop?lat=${latitude}&lon=${longitude}`)
-          .then(r => r.json())
-          .then(data => {
-            if (!data.error) {
-              setNearest(data);
-            }
-          })
-          .catch(console.error)
-          .finally(() => setIsLoading(false));
-      },
-      (error) => {
-        console.error("Geolocation error:", error);
-        setFeedback({ type: 'error', message: 'Failed to get location' });
-        clearFeedback();
-        setIsLoading(false);
-      },
-      { timeout: 10000, enableHighAccuracy: true }
-    );
+    setIsLocating(true);
+    setFeedback({ type: 'info', message: 'Getting your location...' });
+
+    try {
+      const position = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          timeout: 10000,
+          enableHighAccuracy: true
+        });
+      });
+
+      const { latitude, longitude } = position.coords;
+      setUserPos([latitude, longitude]);
+      setCenterPos([latitude, longitude]);
+
+      const nearestResponse = await fetch(
+        `http://localhost:4000/nearest-stop?lat=${latitude}&lon=${longitude}`
+      );
+      const nearestData = await nearestResponse.json();
+
+      if (!nearestData.error) {
+        setNearest(nearestData);
+        setOriginInput(nearestData.stop.name);
+        setFeedback({ 
+          type: 'success', 
+          message: `Location found! Set to ${nearestData.stop.name}` 
+        });
+      } else {
+        setFeedback({ type: 'error', message: 'Found location but no nearby stops' });
+      }
+    } catch (error) {
+      console.error("Geolocation error:", error);
+      let errorMessage = 'Failed to get location';
+      if (error.code === error.TIMEOUT) {
+        errorMessage = 'Location request timed out';
+      } else if (error.code === error.PERMISSION_DENIED) {
+        errorMessage = 'Location access denied. Please enable location services.';
+      }
+      setFeedback({ type: 'error', message: errorMessage });
+    } finally {
+      setIsLocating(false);
+      clearFeedback();
+    }
   }, [clearFeedback]);
 
-  // Autocomplete handlers
-  const handleOriginInput = (e) => {
-    const value = e.target.value;
+  // FIXED: Completely stable input handlers using refs
+  const handleOriginInput = useCallback((value) => {
     setOriginInput(value);
+    
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
     if (value.length < 2) {
       setOriginSuggestions([]);
       return;
     }
-    const filtered = stops.filter(s => 
-      s.name.toLowerCase().includes(value.toLowerCase())
-    );
-    setOriginSuggestions(filtered.slice(0, 5));
-  };
+    
+    searchTimeoutRef.current = setTimeout(() => {
+      const filtered = stopsRef.current.filter(s => 
+        s.name.toLowerCase().includes(value.toLowerCase())
+      );
+      setOriginSuggestions(filtered.slice(0, 5));
+    }, 150);
+  }, []);
 
-  const handleDestInput = (e) => {
-    const value = e.target.value;
+  const handleDestInput = useCallback((value) => {
     setDestInput(value);
+    
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
     if (value.length < 2) {
       setDestSuggestions([]);
       return;
     }
-    const filtered = stops.filter(s => 
-      s.name.toLowerCase().includes(value.toLowerCase())
-    );
-    setDestSuggestions(filtered.slice(0, 5));
-  };
+    
+    searchTimeoutRef.current = setTimeout(() => {
+      const filtered = stopsRef.current.filter(s => 
+        s.name.toLowerCase().includes(value.toLowerCase())
+      );
+      setDestSuggestions(filtered.slice(0, 5));
+    }, 150);
+  }, []);
 
-  const selectOriginStop = (stop) => {
-    setOriginInput(stop.name);
+  // Stable selection handlers
+  const selectOrigin = useCallback((item) => {
+    setOriginInput(item.name);
+    setCenterPos([item.lat, item.lon]);
     setOriginSuggestions([]);
-    setCenterPos([stop.lat, stop.lon]);
-  };
+  }, []);
 
-  const selectDestStop = (stop) => {
-    setDestInput(stop.name);
+  const selectDestination = useCallback((item) => {
+    setDestInput(item.name);
+    setCenterPos([item.lat, item.lon]);
     setDestSuggestions([]);
-    setCenterPos([stop.lat, stop.lon]);
-  };
+  }, []);
 
+  // Fetch stop information
   const fetchStopInfo = async (stopId, destId = null) => {
     try {
       setIsLoading(true);
@@ -366,6 +439,54 @@ export default function App() {
     setDrawerOpen(true);
   };
 
+  // Trip planning function
+  const planTrip = async () => {
+    if (!originInput || !destInput) {
+      setFeedback({ type: 'error', message: 'Please enter both origin and destination' });
+      clearFeedback();
+      return;
+    }
+
+    setIsLoading(true);
+    setFeedback({ type: 'info', message: 'Planning your route...' });
+
+    try {
+      const fromStop = stopsRef.current.find(s => s.name.toLowerCase() === originInput.toLowerCase());
+      const toStop = stopsRef.current.find(s => s.name.toLowerCase() === destInput.toLowerCase());
+
+      if (!fromStop || !toStop) {
+        setFeedback({ type: 'error', message: 'Please select valid bus stops from suggestions' });
+        return;
+      }
+
+      const response = await fetch(
+        `https://router.project-osrm.org/route/v1/driving/${fromStop.lon},${fromStop.lat};${toStop.lon},${toStop.lat}?overview=full&geometries=geojson`
+      );
+      const data = await response.json();
+
+      if (data.code === 'Ok' && data.routes?.[0]) {
+        const path = data.routes[0].geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+        setCurrentRoutePath(path);
+        setCurrentRouteColor("#28a745");
+        
+        const distance = (data.routes[0].distance / 1000).toFixed(1);
+        const duration = Math.round(data.routes[0].duration / 60);
+        
+        const message = `Route found: ${distance} km, ${formatMinutes(duration)}`;
+        setFeedback({ type: 'success', message });
+        setDrawerOpen(true);
+      } else {
+        setFeedback({ type: 'error', message: 'No route found between stops' });
+      }
+    } catch (error) {
+      console.error('Trip planning error:', error);
+      setFeedback({ type: 'error', message: 'Failed to plan route' });
+    } finally {
+      setIsLoading(false);
+      clearFeedback();
+    }
+  };
+
   const computeFullTrip = () => {
     if (!nearest?.stop || !stopInfo) {
       setFeedback({ type: 'error', message: 'Missing location or stop information' });
@@ -392,107 +513,47 @@ export default function App() {
     return { walk, wait, ride, total: totalMinutes, bus: comingBus.vehicle_id };
   };
 
-  const planTripByRoad = async () => {
-    const fromStop = stops.find(s => s.name.toLowerCase() === originInput.toLowerCase());
-    const toStop = stops.find(s => s.name.toLowerCase() === destInput.toLowerCase());
-
-    if (!fromStop || !toStop) {
-      setFeedback({ type: 'error', message: 'Please select valid stops' });
-      clearFeedback();
-      return;
-    }
-
-    try {
-      setIsLoading(true);
-      const response = await fetch(
-        `https://router.project-osrm.org/route/v1/driving/${fromStop.lon},${fromStop.lat};${toStop.lon},${toStop.lat}?overview=full&geometries=geojson`
-      );
-      const data = await response.json();
-
-      if (data.code === 'Ok' && data.routes?.[0]) {
-        const path = data.routes[0].geometry.coordinates.map(([lon, lat]) => [lat, lon]);
-        setCurrentRoutePath(path);
-        setCurrentRouteColor("#28a745");
-        setSelectedRoute(null);
-        setSelectedStop(null);
-        setStopInfo(null);
-        setDrawerOpen(true);
-        setFeedback({ type: 'success', message: `Route planned from ${fromStop.name} to ${toStop.name}` });
-        clearFeedback();
-      } else {
-        setFeedback({ type: 'error', message: 'No route found between selected stops' });
-        clearFeedback();
-      }
-    } catch (error) {
-      console.error("Route planning error:", error);
-      setFeedback({ type: 'error', message: 'Failed to plan route' });
-      clearFeedback();
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Component rendering
-  const TripPlanningSearch = () => (
+  // FIXED: Memoized TripPlanningSearch component
+  const TripPlanningSearch = React.memo(() => (
     <div className="search-card modern-card">
       <div className="search-title">Plan Your Trip</div>
       
       <div className="location-action">
-        <button className="btn black" onClick={getUserLocation} disabled={isLoading}>
-          {isLoading ? "📍 Locating..." : "📍 Use My Location"}
+        <button 
+          className="btn black" 
+          onClick={getUserLocation} 
+          disabled={isLocating}
+        >
+          {isLocating ? "📍 Locating..." : "📍 Use My Location"}
         </button>
       </div>
 
       <div className="autocomplete-group">
-        <div className="autocomplete-field">
-          <label>From</label>
-          <input
-            type="text"
-            placeholder="Enter origin stop"
-            value={originInput}
-            onChange={handleOriginInput}
-            className="autocomplete-input"
-            autoComplete="off"
-          />
-          {originSuggestions.length > 0 && (
-            <div className="autocomplete-suggestions">
-              {originSuggestions.map(stop => (
-                <div key={stop.id} className="suggestion-item" onClick={() => selectOriginStop(stop)}>
-                  <span className="suggestion-icon">🟢</span>
-                  <span>{stop.name} ({stop.routeId})</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <SearchInput
+          inputRef={originInputRef}
+          value={originInput}
+          onChange={handleOriginInput}
+          onSelectSuggestion={selectOrigin}
+          suggestions={originSuggestions}
+          placeholder="Enter bus stop name"
+          label="From"
+        />
 
-        <div className="autocomplete-field">
-          <label>To</label>
-          <input
-            type="text"
-            placeholder="Enter destination stop"
-            value={destInput}
-            onChange={handleDestInput}
-            className="autocomplete-input"
-            autoComplete="off"
-          />
-          {destSuggestions.length > 0 && (
-            <div className="autocomplete-suggestions">
-              {destSuggestions.map(stop => (
-                <div key={stop.id} className="suggestion-item" onClick={() => selectDestStop(stop)}>
-                  <span className="suggestion-icon">🔵</span>
-                  <span>{stop.name} ({stop.routeId})</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <SearchInput
+          inputRef={destInputRef}
+          value={destInput}
+          onChange={handleDestInput}
+          onSelectSuggestion={selectDestination}
+          suggestions={destSuggestions}
+          placeholder="Enter bus stop name"
+          label="To"
+        />
       </div>
 
       <div className="actions-row modern-actions">
         <button 
           className="btn black" 
-          onClick={planTripByRoad}
+          onClick={planTrip}
           disabled={!originInput || !destInput || isLoading}
         >
           {isLoading ? "Planning..." : "Find Route"}
@@ -501,7 +562,7 @@ export default function App() {
 
       {nearest && (
         <div className="nearest-card">
-          <div className="title">Nearest Stop</div>
+          <div className="title">Current Location</div>
           <div className="big">{nearest.stop.name}</div>
           <div className="muted">
             Walk: {formatMinutes(nearest.walk_minutes)} • {formatMeters(nearest.distance_m)}
@@ -509,9 +570,9 @@ export default function App() {
         </div>
       )}
     </div>
-  );
+  ));
 
-  const RouteExplorationSearch = () => (
+  const RouteExplorationSearch = React.memo(() => (
     <div className="search-card modern-card">
       <div className="search-title">Explore Routes</div>
       
@@ -558,9 +619,9 @@ export default function App() {
         </button>
       </div>
     </div>
-  );
+  ));
 
-  const SimulationControls = () => (
+  const SimulationControls = React.memo(() => (
     <div className="search-card modern-card">
       <div className="search-title">Simulation Controls</div>
       <div className="simulation-controls">
@@ -598,9 +659,9 @@ export default function App() {
         </div>
       </div>
     </div>
-  );
+  ));
 
-  const MapOptions = () => (
+  const MapOptions = React.memo(() => (
     <div className="map-options">
       <button 
         className={mapType === 'standard' ? 'active' : ''}
@@ -615,7 +676,86 @@ export default function App() {
         Satellite
       </button>
     </div>
-  );
+  ));
+
+  // Drawer content
+  const DrawerContent = React.memo(() => {
+    if (!stopInfo) {
+      return (
+        <div className="drawer-default-content">
+          <h3>Bus Information</h3>
+          <p>Select a bus stop to see arrival times and bus information.</p>
+          {nearest && (
+            <div className="nearest-info">
+              <h4>Your Nearest Stop</h4>
+              <p><strong>{nearest.stop.name}</strong></p>
+              <p>Walk: {formatMinutes(nearest.walk_minutes)} • {formatMeters(nearest.distance_m)}</p>
+              <button 
+                className="btn black" 
+                onClick={() => onSelectStop(nearest.stop.id)}
+              >
+                View Bus Times
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="stop-info-content">
+        <div className="stop-header">
+          <h3>{stopInfo.stop.name}</h3>
+          <p className="route-info">Route: {stopInfo.routeId}</p>
+        </div>
+        
+        <div className="buses-section">
+          <h4>Live Bus Information</h4>
+          {stopInfo.buses && stopInfo.buses.length > 0 ? (
+            <div className="buses-list">
+              {stopInfo.buses.map(bus => (
+                <div key={bus.vehicle_id} className={`bus-item ${bus.status}`}>
+                  <div className="bus-header">
+                    <span className="bus-id">{bus.vehicle_id}</span>
+                    <span className={`bus-status ${bus.status}`}>
+                      {bus.status === 'coming' ? '🟢 Arriving' : '🔴 Departed'}
+                    </span>
+                  </div>
+                  <div className="bus-details">
+                    <div className="bus-eta">
+                      {bus.status === 'coming' ? (
+                        <span className="eta-time">{formatMinutes(bus.eta_to_stop_minutes)}</span>
+                      ) : (
+                        <span className="eta-passed">Departed</span>
+                      )}
+                    </div>
+                    <div className="bus-meta">
+                      <span>Speed: {Math.round((bus.speed_kmph || 0) * 10) / 10} km/h</span>
+                      {bus.eta_to_dest_minutes && (
+                        <span>To destination: {formatMinutes(bus.eta_to_dest_minutes)}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="no-buses">
+              <p>No buses currently on this route</p>
+            </div>
+        )}
+        </div>
+
+        {stopInfo.buses && stopInfo.buses.some(b => b.status === 'coming') && nearest && (
+          <div className="trip-planning">
+            <button className="btn black full-width" onClick={computeFullTrip}>
+              Calculate Total Trip ETA from Your Location
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  });
 
   return (
     <div className="app-container">
@@ -784,37 +924,7 @@ export default function App() {
             </div>
 
             <div className="drawer-content">
-              {stopInfo && (
-                <div className="stop-info">
-                  <h3>{stopInfo.stop.name}</h3>
-                  <p>Route: {stopInfo.routeId}</p>
-                  
-                  <div className="buses-list">
-                    <h4>Buses</h4>
-                    {stopInfo.buses.length === 0 ? (
-                      <p className="no-buses">No buses available</p>
-                    ) : (
-                      stopInfo.buses.map(bus => (
-                        <div key={bus.vehicle_id} className="bus-info">
-                          <span className="bus-id">{bus.vehicle_id}</span>
-                          <span className={`status ${bus.status}`}>
-                            {bus.status === 'coming' ? 'Arriving' : 'Departed'}
-                          </span>
-                          <span className="eta">
-                            {bus.status === 'coming' ? formatMinutes(bus.eta_to_stop_minutes) : '--'}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  {stopInfo.buses.some(b => b.status === 'coming') && (
-                    <button className="btn black" onClick={computeFullTrip}>
-                      Calculate Total Trip ETA
-                    </button>
-                  )}
-                </div>
-              )}
+              <DrawerContent />
             </div>
           </div>
         </section>
