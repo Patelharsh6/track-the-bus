@@ -12,10 +12,12 @@
   "type": "module",
   "dependencies": {
     "aedes": "^0.51.3",
+    "axios": "^1.13.2",
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "mqtt": "^5.14.1",
+    "node-fetch": "^3.3.2",
     "sqlite3": "^5.1.7",
     "ws": "^8.18.3"
   }
