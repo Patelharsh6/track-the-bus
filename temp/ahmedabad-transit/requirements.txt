@@ -1,0 +1,26 @@
+# Web Framework
+flask==2.3.3
+flask-socketio==5.3.6
+flask-cors==4.0.0
+
+# MQTT
+paho-mqtt==1.6.1
+
+# HTTP Requests
+requests==2.31.0
+
+# Data Processing
+numpy==1.25.2
+pandas==2.1.0
+
+# Geo Calculations
+geopy==2.3.0
+
+# Environment Variables
+python-dotenv==1.0.0
+
+# Async
+eventlet==0.33.3
+
+# API
+gunicorn==21.2.0

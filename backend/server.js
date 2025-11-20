@@ -358,6 +358,76 @@ app.post("/admin/add-route", (req, res) => {
 });
 
 /* -------------------------
+   Simulation Endpoints
+--------------------------*/
+let simulationSpeed = 1;
+let simulationInterval = null;
+
+app.post("/simulation/start", (req, res) => {
+    if (simulationInterval) {
+        return res.status(400).json({ message: "Simulation already running." });
+    }
+
+    simulationInterval = setInterval(() => {
+        Object.keys(vehicleData).forEach((id) => {
+            const vehicle = vehicleData[id];
+            vehicle.lat += (Math.random() - 0.5) * 0.001 * simulationSpeed;
+            vehicle.lon += (Math.random() - 0.5) * 0.001 * simulationSpeed;
+            vehicle.speed_kmph = Math.random() * 50;
+            broadcastWS({ type: "telemetry", ...vehicle });
+        });
+    }, 1000 / simulationSpeed);
+
+    res.json({ message: "Simulation started." });
+});
+
+app.post("/simulation/stop", (req, res) => {
+    if (!simulationInterval) {
+        return res.status(400).json({ message: "Simulation not running." });
+    }
+
+    clearInterval(simulationInterval);
+    simulationInterval = null;
+    res.json({ message: "Simulation stopped." });
+});
+
+app.post("/simulation/speed", (req, res) => {
+    const { value } = req.query;
+    const speed = parseInt(value, 10);
+
+    if (isNaN(speed) || speed < 1 || speed > 10) {
+        return res.status(400).json({ message: "Invalid speed value." });
+    }
+
+    simulationSpeed = speed;
+    if (simulationInterval) {
+        clearInterval(simulationInterval);
+        simulationInterval = setInterval(() => {
+            Object.keys(vehicleData).forEach((id) => {
+                const vehicle = vehicleData[id];
+                vehicle.lat += (Math.random() - 0.5) * 0.001 * simulationSpeed;
+                vehicle.lon += (Math.random() - 0.5) * 0.001 * simulationSpeed;
+                vehicle.speed_kmph = Math.random() * 50;
+                broadcastWS({ type: "telemetry", ...vehicle });
+            });
+        }, 1000 / simulationSpeed);
+    }
+
+    res.json({ message: `Simulation speed set to ${speed}.` });
+});
+
+/* -------------------------
+   Debugging Simulation Endpoints
+--------------------------*/
+app.get("/simulation/debug", (req, res) => {
+    res.json({
+        simulationRunning: !!simulationInterval,
+        simulationSpeed,
+        vehicleData,
+    });
+});
+
+/* -------------------------
    Start server
 --------------------------*/
 server.listen(PORT, () => {

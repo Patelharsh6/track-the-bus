@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Ahmedabad Transit</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #f5f5f5; }
+        .admin-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: #2c3e50; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .tabs { display: flex; background: white; border-radius: 8px; margin-bottom: 20px; }
+        .tab { padding: 15px 20px; cursor: pointer; border-bottom: 3px solid transparent; }
+        .tab.active { border-bottom-color: #3498db; font-weight: bold; }
+        .tab-content { display: none; background: white; padding: 20px; border-radius: 8px; }
+        .tab-content.active { display: block; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f8f9fa; }
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; margin: 2px; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-success { background: #27ae60; color: white; }
+        .btn-danger { background: #e74c3c; color: white; }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <div class="header">
+            <h1>🚍 Ahmedabad Transit - Admin Panel</h1>
+            <p>Manage routes, vehicles, and simulation</p>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <h3>Active Buses</h3>
+                <p id="activeBuses">0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Total Routes</h3>
+                <p id="totalRoutes">0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Total Stops</h3>
+                <p id="totalStops">0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Simulation</h3>
+                <p id="simStatus">Stopped</p>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('simulation')">Simulation</div>
+            <div class="tab" onclick="showTab('routes')">Routes</div>
+            <div class="tab" onclick="showTab('vehicles')">Vehicles</div>
+            <div class="tab" onclick="showTab('stops')">Stops</div>
+        </div>
+
+        <div id="simulation" class="tab-content active">
+            <h2>Simulation Controls</h2>
+            <div style="margin: 20px 0;">
+                <button class="btn btn-success" onclick="startSimulation()">Start Simulation</button>
+                <button class="btn btn-danger" onclick="stopSimulation()">Stop Simulation</button>
+                <button class="btn btn-primary" onclick="addSimulatedBus()">Add Test Bus</button>
+            </div>
+            <div id="simulationStatus">No simulation data available</div>
+        </div>
+
+        <div id="routes" class="tab-content">
+            <h2>Route Management</h2>
+            <table id="routesTable">
+                <thead>
+                    <tr>
+                        <th>Route ID</th>
+                        <th>Name</th>
+                        <th>Stops</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div id="vehicles" class="tab-content">
+            <h2>Vehicle Management</h2>
+            <table id="vehiclesTable">
+                <thead>
+                    <tr>
+                        <th>Vehicle ID</th>
+                        <th>Route</th>
+                        <th>Position</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div id="stops" class="tab-content">
+            <h2>Bus Stops</h2>
+            <table id="stopsTable">
+                <thead>
+                    <tr>
+                        <th>Stop ID</th>
+                        <th>Name</th>
+                        <th>Location</th>
+                        <th>Routes</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let socket;
+
+        function connectWebSocket() {
+            socket = io();
+            
+            socket.on('connect', () => {
+                console.log('Connected to server');
+                loadInitialData();
+            });
+
+            socket.on('vehicleUpdate', (data) => {
+                updateVehicleTable();
+            });
+
+            socket.on('initialData', (data) => {
+                updateStats(data);
+                updateTables(data);
+            });
+        }
+
+        function loadInitialData() {
+            fetch('/api/routes').then(r => r.json()).then(updateRoutesTable);
+            fetch('/api/vehicles').then(r => r.json()).then(updateVehiclesTable);
+            fetch('/api/stops').then(r => r.json()).then(updateStopsTable);
+        }
+
+        function showTab(tabName) {
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(tabName).classList.add('active');
+        }
+
+        function startSimulation() {
+            fetch('/api/simulation/start', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    alert('Simulation started!');
+                    document.getElementById('simStatus').textContent = 'Running';
+                });
+        }
+
+        function stopSimulation() {
+            fetch('/api/simulation/stop', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    alert('Simulation stopped!');
+                    document.getElementById('simStatus').textContent = 'Stopped';
+                });
+        }
+
+        function addSimulatedBus() {
+            fetch('/api/simulation/add-bus', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    alert('Test bus added!');
+                });
+        }
+
+        function updateStats(data) {
+            document.getElementById('activeBuses').textContent = data.vehicles?.length || 0;
+            document.getElementById('totalRoutes').textContent = data.routes?.length || 0;
+            document.getElementById('totalStops').textContent = data.stops?.length || 0;
+        }
+
+        function updateRoutesTable(routes) {
+            const tbody = document.querySelector('#routesTable tbody');
+            tbody.innerHTML = routes.map(route => `
+                <tr>
+                    <td>${route.id}</td>
+                    <td>${route.name}</td>
+                    <td>${route.stops.length} stops</td>
+                    <td>
+                        <button class="btn btn-primary">Edit</button>
+                        <button class="btn btn-danger">Delete</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function updateVehiclesTable(vehicles) {
+            const tbody = document.querySelector('#vehiclesTable tbody');
+            tbody.innerHTML = vehicles.map(vehicle => `
+                <tr>
+                    <td>${vehicle.id}</td>
+                    <td>${vehicle.route || 'Unassigned'}</td>
+                    <td>${vehicle.lat?.toFixed(4)}, ${vehicle.lon?.toFixed(4)}</td>
+                    <td>${vehicle.status || 'Unknown'}</td>
+                    <td>
+                        <button class="btn btn-primary">Assign Route</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function updateStopsTable(stops) {
+            const tbody = document.querySelector('#stopsTable tbody');
+            tbody.innerHTML = stops.map(stop => `
+                <tr>
+                    <td>${stop.id}</td>
+                    <td>${stop.name}</td>
+                    <td>${stop.lat.toFixed(4)}, ${stop.lon.toFixed(4)}</td>
+                    <td>Multiple routes</td>
+                </tr>
+            `).join('');
+        }
+
+        function updateTables(data) {
+            if (data.routes) updateRoutesTable(data.routes);
+            if (data.vehicles) updateVehiclesTable(data.vehicles);
+            if (data.stops) updateStopsTable(data.stops);
+        }
+
+        // Initialize when page loads
+        window.onload = connectWebSocket;
+    </script>
+    <script src="/socket.io/socket.io.js"></script>
+</body>
+</html>
